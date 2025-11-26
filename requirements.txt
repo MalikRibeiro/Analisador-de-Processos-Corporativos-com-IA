@@ -1,0 +1,9 @@
+opencv-python
+mss
+google-generativeai
+pynput
+pygetwindow
+python-dotenv
+numpy
+customtkinter
+packaging

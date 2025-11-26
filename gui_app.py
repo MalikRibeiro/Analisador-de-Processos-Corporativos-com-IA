@@ -3,6 +3,8 @@ import threading
 import sys
 import os
 import time
+import webbrowser
+from datetime import datetime
 from tkinter import messagebox
 
 # Ensure the app module is found
@@ -22,8 +24,9 @@ class CorporateProcessAnalyzerGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Corporate Process Analyzer")
-        self.geometry("700x600")
+        self.title("Analisador de Processos Corporativos com IA")
+        self.geometry("800x600")
+        self.resizable(False, False)
 
         # Create output directories
         self.data_dir = os.path.join(os.getcwd(), "data")
@@ -31,107 +34,222 @@ class CorporateProcessAnalyzerGUI(ctk.CTk):
         os.makedirs(self.data_dir, exist_ok=True)
         os.makedirs(self.reports_dir, exist_ok=True)
         
-        self.video_path = os.path.join(self.data_dir, "process_recording.mp4")
-        self.report_path = os.path.join(self.reports_dir, "relatorio_processo.md")
+        # State variables
+        self.is_recording = False
+        self.start_time = None
+        self.current_video_path = None
+        self.last_report_path = None
+        self.logs_visible = False
 
         # Initialize Modules
-        self.recorder = ScreenRecorder(output_file=self.video_path)
+        self.recorder = None 
         self.logger = ActionLogger()
         self.miner = ProcessMiner()
         self.analyst = None
         self.advisor = AutomationAdvisor(output_dir=self.reports_dir)
 
-        # UI Elements
-        self.create_widgets()
+        # UI Layout
+        self.create_layout()
         
         # Initialize AI Agent in background
         threading.Thread(target=self.init_ai_agent, daemon=True).start()
 
-    def create_widgets(self):
-        # Grid Layout Configuration
+    def create_layout(self):
+        # Grid Configuration
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1) # Log area expands
+        self.grid_rowconfigure(2, weight=1) # Main content area expands
 
-        # Header
-        self.header_label = ctk.CTkLabel(self, text="Corporate Process Analyzer AI", font=("Roboto", 24, "bold"))
-        self.header_label.grid(row=0, column=0, pady=(20, 10), sticky="ew")
+        # --- 1. Header (Title + Settings) ---
+        self.header_frame = ctk.CTkFrame(self, fg_color="transparent", height=60)
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=20, pady=(15, 5))
+        self.header_frame.grid_columnconfigure(0, weight=1)
 
-        # Settings Frame (Language)
-        self.settings_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.settings_frame.grid(row=1, column=0, pady=(0, 10))
+        self.lbl_title = ctk.CTkLabel(self.header_frame, text="Analisador de Processos Corporativos com IA", font=("Roboto", 20, "bold"))
+        self.lbl_title.grid(row=0, column=0, sticky="w")
 
-        self.lbl_lang = ctk.CTkLabel(self.settings_frame, text="Idioma do Relatório:", font=("Roboto", 12))
-        self.lbl_lang.grid(row=0, column=0, padx=5)
+        self.btn_settings = ctk.CTkButton(self.header_frame, text="⚙️", width=40, height=40, 
+                                          fg_color="transparent", hover_color="#444", 
+                                          font=("Arial", 20), command=self.open_settings)
+        self.btn_settings.grid(row=0, column=1, sticky="e")
 
-        self.cmb_language = ctk.CTkComboBox(self.settings_frame, values=["Português", "English", "Español"], state="readonly")
+        # --- 2. Stepper (Indicators) ---
+        self.stepper_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.stepper_frame.grid(row=1, column=0, pady=10)
+
+        self.step_1 = self.create_step_indicator(self.stepper_frame, "1", "Gravação", active=True)
+        self.step_1.grid(row=0, column=0, padx=15)
+        
+        self.step_2 = self.create_step_indicator(self.stepper_frame, "2", "Análise IA", active=False)
+        self.step_2.grid(row=0, column=1, padx=15)
+        
+        self.step_3 = self.create_step_indicator(self.stepper_frame, "3", "Resultados", active=False)
+        self.step_3.grid(row=0, column=2, padx=15)
+
+        # --- 3. Main Content Area (Dynamic Stages) ---
+        self.main_frame = ctk.CTkFrame(self, fg_color="#2b2b2b", corner_radius=15)
+        self.main_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=10)
+        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(0, weight=1)
+
+        # Create the different stage frames (only one visible at a time)
+        self.stage_start = self.create_stage_start()
+        self.stage_recording = self.create_stage_recording()
+        self.stage_analyzing = self.create_stage_analyzing()
+        self.stage_results = self.create_stage_results()
+
+        # --- 4. Footer (Status + Logs) ---
+        self.footer_frame = ctk.CTkFrame(self, fg_color="#1a1a1a", height=40, corner_radius=0)
+        self.footer_frame.grid(row=3, column=0, sticky="ew")
+        self.footer_frame.grid_columnconfigure(0, weight=1)
+
+        self.lbl_status = ctk.CTkLabel(self.footer_frame, text="Status: Pronto", font=("Roboto", 12), text_color="#aaa")
+        self.lbl_status.grid(row=0, column=0, sticky="w", padx=20, pady=5)
+
+        self.btn_toggle_logs = ctk.CTkButton(self.footer_frame, text="Show Logs", width=80, height=25,
+                                             fg_color="#333", hover_color="#444", font=("Roboto", 10),
+                                             command=self.toggle_logs)
+        self.btn_toggle_logs.grid(row=0, column=1, sticky="e", padx=20, pady=5)
+
+        # Show initial stage (Must be called after footer is created)
+        self.show_stage("start")
+
+        # Hidden Log Window (Toplevel)
+        self.log_window = None
+
+    def create_step_indicator(self, parent, number, text, active=False):
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        
+        color = "#3498db" if active else "#555"
+        text_color = "#fff" if active else "#888"
+        
+        lbl_circle = ctk.CTkLabel(frame, text=number, width=30, height=30, corner_radius=15,
+                                  fg_color=color, text_color="white", font=("Roboto", 14, "bold"))
+        lbl_circle.pack(side="left")
+        
+        lbl_text = ctk.CTkLabel(frame, text=text, font=("Roboto", 14, "bold" if active else "normal"), 
+                                text_color=text_color)
+        lbl_text.pack(side="left", padx=(10, 0))
+        
+        return frame
+
+    def update_stepper(self, step):
+        # Helper to update colors of the stepper
+        def set_style(widget_frame, active):
+            color = "#3498db" if active else "#555"
+            text_color = "#fff" if active else "#888"
+            font_weight = "bold" if active else "normal"
+            
+            # Access children: [Label(Circle), Label(Text)]
+            children = widget_frame.winfo_children()
+            children[0].configure(fg_color=color)
+            children[1].configure(text_color=text_color, font=("Roboto", 14, font_weight))
+
+        set_style(self.step_1, step == 1)
+        set_style(self.step_2, step == 2)
+        set_style(self.step_3, step == 3)
+
+    # --- Stage Creation Helpers ---
+
+    def create_stage_start(self):
+        frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        
+        lbl_hint = ctk.CTkLabel(frame, text="Selecione o idioma e inicie a gravação", font=("Roboto", 16), text_color="#ccc")
+        lbl_hint.pack(pady=(40, 20))
+
+        self.cmb_language = ctk.CTkComboBox(frame, values=["Português", "English", "Español"], 
+                                            width=200, height=35, font=("Roboto", 14), state="readonly")
         self.cmb_language.set("Português")
-        self.cmb_language.grid(row=0, column=1, padx=5)
+        self.cmb_language.pack(pady=10)
 
-        # Buttons Frame
-        self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.btn_frame.grid(row=2, column=0, pady=10)
+        btn_start = ctk.CTkButton(frame, text="🔴 Iniciar Gravação", font=("Roboto", 18, "bold"),
+                                  fg_color="#2ecc71", hover_color="#27ae60", width=250, height=60, corner_radius=30,
+                                  command=self.start_recording)
+        btn_start.pack(pady=30)
+        
+        return frame
 
-        self.btn_record = ctk.CTkButton(self.btn_frame, text="Iniciar Gravação", font=("Roboto", 14, "bold"), 
-                                        fg_color="#2ecc71", hover_color="#27ae60", width=200, height=40,
-                                        command=self.start_recording)
-        self.btn_record.grid(row=0, column=0, padx=10)
+    def create_stage_recording(self):
+        frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        
+        lbl_rec = ctk.CTkLabel(frame, text="GRAVANDO...", font=("Roboto", 16, "bold"), text_color="#e74c3c")
+        lbl_rec.pack(pady=(40, 10))
 
-        self.btn_stop = ctk.CTkButton(self.btn_frame, text="Parar e Analisar", font=("Roboto", 14, "bold"), 
-                                      fg_color="#e74c3c", hover_color="#c0392b", width=200, height=40,
-                                      command=self.stop_and_analyze, state="disabled")
-        self.btn_stop.grid(row=0, column=1, padx=10)
+        self.lbl_timer_big = ctk.CTkLabel(frame, text="00:00:00", font=("Consolas", 60, "bold"), text_color="#fff")
+        self.lbl_timer_big.pack(pady=20)
 
-        # Progress Bar (Initially hidden or stopped)
-        self.progress_bar = ctk.CTkProgressBar(self, width=400, mode="indeterminate")
-        self.progress_bar.grid(row=3, column=0, pady=(10, 0))
-        self.progress_bar.set(0)
-        self.progress_bar.grid_remove() # Hide initially
+        lbl_info = ctk.CTkLabel(frame, text="Minimize esta janela e realize o processo.", font=("Roboto", 14), text_color="#aaa")
+        lbl_info.pack(pady=10)
 
-        # Log Area
-        self.log_label = ctk.CTkLabel(self, text="Log de Atividades:", font=("Roboto", 12))
-        self.log_label.grid(row=4, column=0, sticky="w", padx=20, pady=(10, 0))
+        btn_stop = ctk.CTkButton(frame, text="⏹ Parar e Analisar", font=("Roboto", 18, "bold"),
+                                 fg_color="#e74c3c", hover_color="#c0392b", width=250, height=60, corner_radius=30,
+                                 command=self.stop_and_analyze)
+        btn_stop.pack(pady=30)
+        
+        return frame
 
-        self.log_area = ctk.CTkTextbox(self, width=660, height=200, font=("Consolas", 12))
-        self.log_area.grid(row=5, column=0, padx=20, pady=(5, 10), sticky="nsew")
-        self.log_area.configure(state="disabled")
+    def create_stage_analyzing(self):
+        frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        
+        lbl_title = ctk.CTkLabel(frame, text="Analisando Processo", font=("Roboto", 20, "bold"))
+        lbl_title.pack(pady=(50, 20))
 
-        # Footer Button
-        self.btn_open_reports = ctk.CTkButton(self, text="Abrir Pasta de Relatórios", font=("Roboto", 12), 
-                                              fg_color="#3498db", hover_color="#2980b9",
-                                              command=self.open_reports_folder)
-        self.btn_open_reports.grid(row=6, column=0, pady=20)
+        self.progress_bar = ctk.CTkProgressBar(frame, width=400, height=20, mode="indeterminate")
+        self.progress_bar.pack(pady=20)
+        self.progress_bar.start()
 
-    # --- Thread-Safe UI Updates ---
-    def safe_log(self, message):
-        """Updates the log area from the main thread."""
-        self.after(0, lambda: self._update_log(message))
+        lbl_desc = ctk.CTkLabel(frame, text="A IA está assistindo ao vídeo e identificando gargalos...\nIsso pode levar alguns minutos.", 
+                                font=("Roboto", 14), text_color="#aaa")
+        lbl_desc.pack(pady=10)
+        
+        return frame
 
-    def _update_log(self, message):
-        self.log_area.configure(state="normal")
-        self.log_area.insert("end", f"[{time.strftime('%H:%M:%S')}] {message}\n")
-        self.log_area.see("end")
-        self.log_area.configure(state="disabled")
+    def create_stage_results(self):
+        frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        
+        lbl_icon = ctk.CTkLabel(frame, text="✅", font=("Arial", 80))
+        lbl_icon.pack(pady=(30, 10))
 
-    def safe_toggle_buttons(self, recording=False, analyzing=False):
-        """Updates button states from the main thread."""
-        self.after(0, lambda: self._update_buttons(recording, analyzing))
+        lbl_success = ctk.CTkLabel(frame, text="Análise Concluída!", font=("Roboto", 24, "bold"), text_color="#2ecc71")
+        lbl_success.pack(pady=10)
 
-    def _update_buttons(self, recording, analyzing):
-        if recording:
-            self.btn_record.configure(state="disabled")
-            self.btn_stop.configure(state="normal")
-        elif analyzing:
-            self.btn_record.configure(state="disabled")
-            self.btn_stop.configure(state="disabled")
-            self.progress_bar.grid() # Show progress bar
-            self.progress_bar.start()
-        else: # Reset / Idle
-            self.btn_record.configure(state="normal")
-            self.btn_stop.configure(state="disabled")
-            self.progress_bar.stop()
-            self.progress_bar.grid_remove() # Hide progress bar
+        btn_view = ctk.CTkButton(frame, text="✨ Visualizar Relatório", font=("Roboto", 18, "bold"),
+                                 fg_color="#9b59b6", hover_color="#8e44ad", width=280, height=60, corner_radius=30,
+                                 command=self.open_report_browser)
+        btn_view.pack(pady=30)
 
-    # --- Logic ---
+        btn_back = ctk.CTkButton(frame, text="Voltar ao Início", font=("Roboto", 14),
+                                 fg_color="transparent", border_width=1, border_color="#555", hover_color="#333",
+                                 command=self.reset_to_start)
+        btn_back.pack(pady=10)
+        
+        return frame
+
+    def show_stage(self, stage_name):
+        # Hide all stages
+        self.stage_start.pack_forget()
+        self.stage_recording.pack_forget()
+        self.stage_analyzing.pack_forget()
+        self.stage_results.pack_forget()
+
+        # Show requested stage and update stepper
+        if stage_name == "start":
+            self.stage_start.pack(expand=True, fill="both")
+            self.update_stepper(1)
+            self.update_status("Pronto para gravar.")
+        elif stage_name == "recording":
+            self.stage_recording.pack(expand=True, fill="both")
+            self.update_stepper(1)
+            self.update_status("Gravando...")
+        elif stage_name == "analyzing":
+            self.stage_analyzing.pack(expand=True, fill="both")
+            self.update_stepper(2)
+            self.update_status("Processando vídeo...")
+        elif stage_name == "results":
+            self.stage_results.pack(expand=True, fill="both")
+            self.update_stepper(3)
+            self.update_status("Relatório gerado com sucesso.")
+
+    # --- Logic & Actions ---
 
     def init_ai_agent(self):
         try:
@@ -140,98 +258,127 @@ class CorporateProcessAnalyzerGUI(ctk.CTk):
             self.safe_log("Agente de IA pronto.")
         except Exception as e:
             self.safe_log(f"Erro ao inicializar IA: {e}")
+            self.update_status("Erro na API Key")
+
+    def open_settings(self):
+        api_key = ctk.CTkInputDialog(text="Insira sua Google API Key:", title="Configurações").get_input()
+        if api_key:
+            env_path = os.path.join(os.getcwd(), ".env")
+            with open(env_path, "w") as f:
+                f.write(f"GOOGLE_API_KEY={api_key}\n")
+            self.safe_log("API Key salva. Reinicializando...")
+            threading.Thread(target=self.init_ai_agent, daemon=True).start()
+
+    def update_timer(self):
+        if self.is_recording and self.start_time:
+            elapsed = int(time.time() - self.start_time)
+            hours, remainder = divmod(elapsed, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            time_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+            self.lbl_timer_big.configure(text=time_str)
+            self.after(1000, self.update_timer)
 
     def start_recording(self):
-        self.safe_toggle_buttons(recording=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"recording_{timestamp}.mp4"
+        self.current_video_path = os.path.join(self.data_dir, filename)
+        
+        self.recorder = ScreenRecorder(output_file=self.current_video_path)
+        
+        self.is_recording = True
+        self.start_time = time.time()
+        self.show_stage("recording")
+        self.update_timer()
         
         self.recorder.start_recording()
         self.logger.start_logging()
         self.miner.start_monitoring()
         
-        self.safe_log("Gravação INICIADA.")
-        self.safe_log("Minimize esta janela e realize o processo.")
-        self.safe_log("Uma janela de preview da gravação deve aparecer.")
+        self.safe_log(f"Gravação iniciada: {filename}")
 
     def stop_and_analyze(self):
-        self.safe_toggle_buttons(analyzing=True)
+        self.is_recording = False
+        self.show_stage("analyzing")
         
         self.safe_log("Parando gravação...")
         self.recorder.stop_recording()
         self.action_logs = self.logger.stop_logging()
         self.window_logs = self.miner.stop_monitoring()
         
-        self.safe_log(f"Gravação parada. Capturados {len(self.action_logs)} eventos de ação.")
+        self.safe_log(f"Vídeo salvo. Iniciando análise...")
         
-        # Capture language selection from UI before starting thread
         self.current_language = self.cmb_language.get()
-        self.safe_log(f"Idioma selecionado para análise: {self.current_language}")
-
-        # Start analysis in a separate thread
         threading.Thread(target=self.run_analysis, daemon=True).start()
 
     def run_analysis(self):
         if not self.analyst:
-            self.safe_log("ERRO: Agente de IA não foi inicializado corretamente.")
-            self.safe_toggle_buttons(recording=False, analyzing=False)
+            self.safe_log("ERRO: Agente não inicializado.")
+            self.after(0, lambda: messagebox.showerror("Erro", "Configure a API Key antes de continuar."))
+            self.after(0, lambda: self.show_stage("start"))
             return
 
-        self.safe_log("Enviando vídeo para o Gemini (isso pode demorar)...")
-        
         try:
             all_logs = sorted(self.action_logs + self.window_logs)
             
-            # Get selected language from GUI (must be accessed in main thread or via variable if thread-safe)
-            # Since we are in a thread, accessing self.cmb_language.get() might be unsafe in some toolkits,
-            # but usually reading values is fine. To be 100% safe, we should have passed it as an arg.
-            # However, let's try reading it. If it fails, we default.
-            try:
-                # We need to schedule this on main thread to be safe
-                # But for simplicity in this quick refactor, we can pass it when starting the thread.
-                # Let's fix this by getting the value BEFORE starting the thread.
-                pass 
-            except:
-                pass
-
-            # Actually, let's just use the value passed to this function.
-            # I will update the start_thread call to pass the language.
-            pass
-            
-            # Wait, I can't easily change the signature in the middle of this replace block without changing the caller.
-            # Let's assume reading is okay or use a safer way.
-            # Better approach: The caller `stop_and_analyze` should capture the value.
-            
-            # Let's use a class attribute set by stop_and_analyze
-            selected_language = getattr(self, 'current_language', "Português")
-
             analysis_result = self.analyst.analyze_process(
-                video_path=self.video_path,
+                video_path=self.current_video_path,
                 logs=all_logs,
-                language=selected_language
+                language=self.current_language
             )
             
-            self.safe_log("Análise recebida. Gerando relatório...")
-            self.advisor.generate_report(analysis_result, report_filename="relatorio_processo.md")
+            self.safe_log("Gerando HTML...")
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            report_name = f"Relatorio_Processo_{timestamp}.html"
+            self.last_report_path = self.advisor.generate_report(analysis_result, report_filename=report_name)
             
-            self.safe_log(f"Análise concluída! Arquivo salvo em: {self.report_path}")
-            # Optional: Show a popup (must be done in main thread if using tkinter messagebox, 
-            # but customtkinter doesn't have a native message box yet, usually falls back to tkinter's)
-            self.after(0, lambda: messagebox.showinfo("Sucesso", "Análise concluída com sucesso!"))
+            self.safe_log(f"Relatório pronto: {report_name}")
+            self.after(0, lambda: self.show_stage("results"))
             
         except Exception as e:
-            self.safe_log(f"ERRO durante a análise: {e}")
-            # Ensure the error is shown and UI is reset
-            self.after(0, lambda: messagebox.showerror("Erro de Análise", f"Ocorreu um erro durante a análise:\n{str(e)}"))
-        
-        finally:
-            # Always reset buttons to allow retrying
-            self.safe_toggle_buttons(recording=False, analyzing=False)
-            self.safe_log("Pronto para nova gravação.")
+            self.safe_log(f"ERRO: {e}")
+            self.after(0, lambda: messagebox.showerror("Erro na Análise", str(e)))
+            self.after(0, lambda: self.show_stage("start"))
 
-    def open_reports_folder(self):
-        try:
-            os.startfile(self.reports_dir)
-        except Exception as e:
-            self.safe_log(f"Erro ao abrir pasta: {e}")
+    def open_report_browser(self):
+        if self.last_report_path and os.path.exists(self.last_report_path):
+            webbrowser.open(f"file://{self.last_report_path}")
+
+    def reset_to_start(self):
+        self.show_stage("start")
+
+    # --- Logging & Status ---
+
+    def update_status(self, text):
+        self.lbl_status.configure(text=f"Status: {text}")
+
+    def safe_log(self, message):
+        self.after(0, lambda: self._append_log(message))
+
+    def _append_log(self, message):
+        timestamp = time.strftime('%H:%M:%S')
+        log_msg = f"[{timestamp}] {message}"
+        
+        # If log window is open, update it
+        if self.log_window and self.log_window.winfo_exists():
+            self.log_textbox.configure(state="normal")
+            self.log_textbox.insert("end", log_msg + "\n")
+            self.log_textbox.see("end")
+            self.log_textbox.configure(state="disabled")
+        
+        # Also print to console for debugging
+        print(log_msg)
+
+    def toggle_logs(self):
+        if self.log_window is None or not self.log_window.winfo_exists():
+            self.log_window = ctk.CTkToplevel(self)
+            self.log_window.title("Logs Detalhados")
+            self.log_window.geometry("500x400")
+            
+            self.log_textbox = ctk.CTkTextbox(self.log_window, font=("Consolas", 12))
+            self.log_textbox.pack(expand=True, fill="both", padx=10, pady=10)
+            self.log_textbox.configure(state="disabled")
+        else:
+            self.log_window.focus()
 
 if __name__ == "__main__":
     app = CorporateProcessAnalyzerGUI()

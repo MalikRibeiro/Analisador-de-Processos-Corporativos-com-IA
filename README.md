@@ -1,4 +1,4 @@
-# Corporate Process Analyzer AI
+# Analisador de Processos Corporativos com IA
 
 **Corporate Process Analyzer AI** é uma ferramenta avançada de *Process Mining* e Automação que utiliza Inteligência Artificial (Google Gemini) para analisar fluxos de trabalho corporativos. A ferramenta grava a tela do usuário, registra interações e, ao final, gera um relatório detalhado com diagramas de fluxo e sugestões de automação.
 

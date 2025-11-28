@@ -13,22 +13,18 @@ __pycache__/
 venv/
 .venv/
 env/
-
 # --- Arquivos do Projeto (Específicos) ---
 # Ignora os vídeos gravados (são pesados e contêm dados sensíveis)
 data/*.mp4
 data/*.avi
 
-# Ignora os relatórios gerados a cada execução
-reports/*.md
-reports/*.mmd
-reports/*.pdf
+# Ignora todos os arquivos na pasta reports
+reports/
 
 # --- Logs e Banco de Dados ---
 *.log
 *.sqlite3
 
-# --- IDEs e Sistema Operacional ---
 # Configurações do VS Code e outros
 .vscode/
 .idea/

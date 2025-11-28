@@ -43,16 +43,16 @@ class ReportService:
         html_content = markdown.markdown(raw_text, extensions=['fenced_code', 'tables'])
         
         # Insert Flowchart (heuristic: put it before "Sugestões" or at the end)
-        if "Sugestões" in html_content:
-             html_content = html_content.replace("<h2>Sugestões", f"{flowchart_html}\n<h2>Sugestões")
-        elif "<h3>Sugestões" in html_content:
-             html_content = html_content.replace("<h3>Sugestões", f"{flowchart_html}\n<h3>Sugestões")
-        else:
-             html_content += f"\n{flowchart_html}"
+        # CORREÇÃO: A lógica de inserção estava quebrada. Aqui inserimos o fluxo no HTML processado.
+        if flowchart_html:
+            if "Sugestões" in html_content:
+                # Tenta inserir antes do título "Sugestões" (assumindo que o markdown gerou um <h2> ou similar, ajustamos apenas a string)
+                html_content = html_content.replace("Sugestões", f"{flowchart_html}\n<h2>Sugestões", 1)
+            else:
+                html_content += flowchart_html
 
-        # Create full HTML document
-        full_html = f"""
-<!DOCTYPE html>
+        # CORREÇÃO PRINCIPAL: O HTML precisa ser atribuído à variável 'full_html' usando f-string (f""")
+        full_html = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
@@ -68,7 +68,7 @@ class ReportService:
             padding: 20px;
         }}
         .container {{
-            max_width: 900px;
+            max-width: 900px;
             margin: 0 auto;
             background: #fff;
             padding: 40px;
@@ -118,141 +118,7 @@ class ReportService:
         }}
         .flow-step.decision {{
             border-color: #e67e22;
-            border-radius: 20px; /* More rounded for decision */
-        }}
-        .flow-arrow {{
-            font-size: 24px;
-            color: #7f8c8d;
-            margin: -5px 0;
-        }}
-        .footer {{
-            margin-top: 40px;
-            text-align: center;
-            font-size: 0.9em;
-            color: #7f8c8d;
-        }}
-    </style>
-import os
-import re
-import markdown
-import html
-from datetime import datetime
-
-class ReportService:
-    """
-    Generates professional HTML reports from Gemini analysis.
-    """
-
-    def __init__(self, output_dir="."):
-        self.output_dir = output_dir
-
-    def generate_report(self, raw_text, report_filename=None):
-        """
-        Converts the raw markdown analysis into a styled HTML report.
-        Parses JSON flowchart steps and renders them as HTML.
-        """
-        if not report_filename:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            report_filename = f"Relatorio_Processo_{timestamp}.html"
-        
-        report_path = os.path.join(self.output_dir, report_filename)
-        
-        # 1. Extract JSON Flowchart
-        flowchart_html = ""
-        json_match = re.search(r'### FLOWCHART_JSON\s*(\[.*?\])', raw_text, re.DOTALL)
-        
-        if json_match:
-            try:
-                import json
-                json_str = json_match.group(1).strip()
-                steps = json.loads(json_str)
-                flowchart_html = self._generate_flowchart_html(steps)
-                # Remove the JSON block from the text to be rendered
-                raw_text = raw_text.replace(json_match.group(0), "")
-            except Exception as e:
-                print(f"Error parsing flowchart JSON: {e}")
-                flowchart_html = f"<div class='error'>Erro ao gerar fluxograma: {e}</div>"
-        
-        # 2. Convert Markdown to HTML
-        html_content = markdown.markdown(raw_text, extensions=['fenced_code', 'tables'])
-        
-        # Insert Flowchart (heuristic: put it before "Sugestões" or at the end)
-        if "Sugestões" in html_content:
-             html_content = html_content.replace("<h2>Sugestões", f"{flowchart_html}\n<h2>Sugestões")
-        elif "<h3>Sugestões" in html_content:
-             html_content = html_content.replace("<h3>Sugestões", f"{flowchart_html}\n<h3>Sugestões")
-        else:
-             html_content += f"\n{flowchart_html}"
-
-        # Create full HTML document
-        full_html = f"""
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório de Análise de Processo</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding: 20px;
-        }}
-        .container {{
-            max_width: 900px;
-            margin: 0 auto;
-            background: #fff;
-            padding: 40px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }}
-        h1, h2, h3 {{
-            color: #2c3e50;
-        }}
-        h1 {{
-            border-bottom: 2px solid #3498db;
-            padding-bottom: 10px;
-        }}
-        code {{
-            background-color: #f8f9fa;
-            padding: 2px 4px;
-            border-radius: 4px;
-            font-family: 'Courier New', Courier, monospace;
-        }}
-        pre {{
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 5px;
-            overflow-x: auto;
-        }}
-        /* Flowchart Styles */
-        .flowchart-container {{
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 30px 0;
-            padding: 20px;
-            background-color: #f8f9fa;
-            border-radius: 8px;
-        }}
-        .flow-step {{
-            background-color: #fff;
-            border: 2px solid #3498db;
-            border-radius: 8px;
-            padding: 15px 25px;
-            margin: 10px 0;
-            text-align: center;
-            font-weight: 500;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-            max-width: 80%;
-            position: relative;
-        }}
-        .flow-step.decision {{
-            border-color: #e67e22;
-            border-radius: 20px; /* More rounded for decision */
+            border-radius: 20px;
         }}
         .flow-arrow {{
             font-size: 24px;

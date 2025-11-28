@@ -96,7 +96,6 @@ class AIService:
 
         print("Video processed. Generating analysis...")
 
-        # Construct the prompt
         logs_text = "\n".join(logs)
         prompt = f"""
         You are an expert Process Analyst and Automation Engineer.
@@ -111,11 +110,35 @@ class AIService:
         Please analyze this process and provide:
         1. A detailed step-by-step description of the workflow observed.
         2. Identification of bottlenecks, inefficiencies, or repetitive tasks.
-        3. A Mermaid flowchart diagram representing the process.
+        3. A structured list of steps for the process flow, provided as a JSON array.
+           CRITICAL RULES FOR JSON FLOWCHART:
+           - Return a raw JSON array of objects.
+           - Each object must have:
+             - "id": A unique identifier (e.g., "step1", "step2").
+             - "label": A concise text description of the step (max 10 words).
+             - "type": "process" (for actions) or "decision" (for questions/branches).
+             - "next": The ID of the next step (or null if end).
+           - Example format:
+             [
+               {"id": "s1", "label": "Start Process", "type": "process", "next": "s2"},
+               {"id": "s2", "label": "Is data valid?", "type": "decision", "next": "s3"},
+               ...
+             ]
+           - DO NOT include any Markdown formatting (like ```json) around the JSON. Just the raw array.
         4. Concrete suggestions for automation (e.g., using Python scripts, RPA tools, or API integrations).
 
         IMPORTANT: Please write the entire response in {language}.
-        Format your response in Markdown.
+        Format your response in Markdown, BUT keep the JSON array as raw text block labeled "### FLOWCHART_JSON" so I can extract it easily.
+        Example of expected output structure:
+        
+        # Title
+        ... text ...
+        
+        ### FLOWCHART_JSON
+        [ ... json array ... ]
+        
+        ### Suggestions
+        ... text ...
         """
 
         response = self.model.generate_content([video_file, prompt])
